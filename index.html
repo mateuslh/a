@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cálculo de Notas por Dia (10 dias)</title>
+<style>
+  :root { --bg:#0f1220; --card:#171a2a; --muted:#8ea0b5; --txt:#e9eef5; --accent:#7cc5ff; }
+  * { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji"; }
+  body { margin:0; background:linear-gradient(180deg,#0b0e1a, #0f1220); color:var(--txt); }
+  header { padding:24px 16px; text-align:center; }
+  h1 { margin:0; font-size:1.35rem; letter-spacing:.3px; }
+  .container { max-width:1100px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid #232844; border-radius:16px; padding:16px; box-shadow:0 6px 20px rgba(0,0,0,.25); }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:12px; }
+  .day { border:1px dashed #2b3156; border-radius:12px; padding:12px; }
+  .day h3 { margin:0 0 8px 0; font-size:.95rem; color:var(--accent); }
+  label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:4px; }
+  input[type="number"]{
+    width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2b3156;
+    background:#0f1327; color:var(--txt);
+  }
+  input::placeholder{ color:#65708a; }
+  .weights { font-size:.78rem; color:#a8b6c9; margin-top:6px; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; align-items:center; }
+  button {
+    padding:10px 14px; border-radius:10px; border:1px solid #2b3156;
+    background:#1a2140; color:var(--txt); cursor:pointer; font-weight:600;
+  }
+  button.primary { background:#2764ff; border-color:#2764ff; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .result {
+    margin-top:16px; padding:16px; border-radius:12px; background:#0f1327; border:1px solid #2b3156;
+    display:flex; gap:18px; align-items:center; flex-wrap:wrap;
+  }
+  .big { font-size:2.2rem; font-weight:800; color:#b7e4ff; }
+  .muted { color:#9cb0c7; font-size:.92rem; }
+  .note { margin-top:10px; color:#9cb0c7; font-size:.9rem; }
+  .error { color:#ff9aa8; font-size:.85rem; margin-top:8px; display:none; }
+  .footer { margin-top:14px; font-size:.78rem; color:#8ea0b5; }
+  .pill { background:#152047; border:1px solid #2b3156; padding:4px 8px; border-radius:999px; font-size:.78rem; color:#b9c8db; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Calculadora de Notas — 10 dias (pesos 0,6 e 0,4 por dia)</h1>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <div class="grid" id="daysGrid"></div>
+
+      <div class="actions">
+        <button class="primary" id="calcBtn">Calcular</button>
+        <button id="clearBtn">Limpar</button>
+        <span class="pill" id="summaryPill">Dias válidos: 0 / 10</span>
+      </div>
+
+      <div class="result" id="resultBox" aria-live="polite">
+        <div>
+          <div class="muted">Resultado (0–10)</div>
+          <div class="big" id="finalGrade">—</div>
+        </div>
+        <div class="muted">
+          <div id="details"></div>
+          <div class="note">
+            Regras:
+            <ul>
+              <li>Se um <b>dia inteiro</b> ficar vazio, ele <b>não entra</b> no cálculo (peso redistribuído entre os demais dias).</li>
+              <li>Se apenas <b>uma nota</b> de um dia for informada, ela vale <b>100% do dia</b> (peso normalizado).</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="error" id="errorBox"></div>
+      <div class="footer">
+        Dica: deixe um dia em branco para “desconsiderar” aquele dia. As notas devem estar entre 0 e 10.
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const DIAS = 10;
+  const PESO_A = 0.6; // nota A
+  const PESO_B = 0.4; // nota B
+
+  const daysGrid = document.getElementById('daysGrid');
+  const calcBtn = document.getElementById('calcBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const finalGradeEl = document.getElementById('finalGrade');
+  const detailsEl = document.getElementById('details');
+  const errorBox = document.getElementById('errorBox');
+  const summaryPill = document.getElementById('summaryPill');
+
+  // monta os campos
+  for (let i = 1; i <= DIAS; i++){
+    const day = document.createElement('div');
+    day.className = 'day';
+    day.innerHTML = `
+      <h3>Dia ${i}</h3>
+      <label for="d${i}a">Nota A (peso 0,6)</label>
+      <input type="number" step="0.01" min="0" max="10" id="d${i}a" placeholder="0 a 10" />
+      <label for="d${i}b" style="margin-top:8px;">Nota B (peso 0,4)</label>
+      <input type="number" step="0.01" min="0" max="10" id="d${i}b" placeholder="0 a 10" />
+      <div class="weights" id="w${i}">Peso efetivo do dia: —</div>
+    `;
+    daysGrid.appendChild(day);
+  }
+
+  function parseValue(v){
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function calc(){
+    errorBox.style.display = 'none';
+    errorBox.textContent = '';
+
+    const dayInfos = [];
+    for (let i = 1; i <= DIAS; i++){
+      const a = parseValue(document.getElementById(`d${i}a`).value);
+      const b = parseValue(document.getElementById(`d${i}b`).value);
+
+      // valida faixa quando informado
+      for (const val of [a,b]){
+        if (val !== null && (val < 0 || val > 10)){
+          errorBox.style.display = 'block';
+          errorBox.textContent = `Erro: notas devem estar entre 0 e 10 (verifique o Dia ${i}).`;
+          return;
+        }
+      }
+
+      // decide se o dia é válido (pelo menos 1 nota preenchida)
+      const filledCount = (a !== null) + (b !== null);
+      const validDay = filledCount > 0;
+
+      // normalização de pesos dentro do dia:
+      // - se tem as duas, usa 0.6/0.4
+      // - se tem só uma, ela vira 1.0
+      let wA = 0, wB = 0, score = null;
+      if (validDay){
+        if (a !== null && b !== null){
+          wA = PESO_A; wB = PESO_B;
+          score = a * wA + b * wB; // 0..10
+        } else if (a !== null){
+          wA = 1.0; score = a; // só A
+        } else {
+          wB = 1.0; score = b; // só B
+        }
+      }
+
+      dayInfos.push({ i, a, b, validDay, wA, wB, score });
+    }
+
+    const validDays = dayInfos.filter(d => d.validDay);
+    const qtdValidos = validDays.length;
+
+    // se nenhum dia foi preenchido, não há média
+    if (qtdValidos === 0){
+      finalGradeEl.textContent = '—';
+      detailsEl.innerHTML = 'Preencha pelo menos um dia.';
+      summaryPill.textContent = `Dias válidos: 0 / ${DIAS}`;
+      // atualizar pesos exibidos
+      dayInfos.forEach(d => document.getElementById(`w${d.i}`).textContent = 'Peso efetivo do dia: —');
+      return;
+    }
+
+    // média dos dias válidos (redistribuição automática: só contam os dias preenchidos)
+    const somaScores = validDays.reduce((acc,d) => acc + d.score, 0);
+    const media = somaScores / qtdValidos; // 0..10
+
+    // UI: mostrar pesos internos do dia e resumo
+    dayInfos.forEach(d => {
+      const w = document.getElementById(`w${d.i}`);
+      if (!d.validDay){
+        w.textContent = 'Peso efetivo do dia: 0 (dia ignorado)';
+      } else if (d.a !== null && d.b !== null){
+        w.textContent = `Peso efetivo do dia: A=${d.wA.toFixed(1)} | B=${d.wB.toFixed(1)} (somam 1.0)`;
+      } else if (d.a !== null){
+        w.textContent = `Peso efetivo do dia: A=1.0 (B ausente)`;
+      } else {
+        w.textContent = `Peso efetivo do dia: B=1.0 (A ausente)`;
+      }
+    });
+
+    finalGradeEl.textContent = media.toFixed(2);
+    summaryPill.textContent = `Dias válidos: ${qtdValidos} / ${DIAS}`;
+
+    // Detalhes
+    const list = validDays
+      .map(d => {
+        const aTxt = (d.a === null ? '—' : d.a.toFixed(2));
+        const bTxt = (d.b === null ? '—' : d.b.toFixed(2));
+        const wTxt = (d.wA + d.wB).toFixed(1);
+        return `Dia ${d.i}: A=${aTxt} (w=${d.wA.toFixed(1)}), B=${bTxt} (w=${d.wB.toFixed(1)}) → ${d.score.toFixed(2)}`;
+      })
+      .join('<br/>');
+
+    detailsEl.innerHTML = `
+      <div><b>Soma dos dias válidos:</b> ${somaScores.toFixed(2)}</div>
+      <div><b>Quantidade de dias válidos:</b> ${qtdValidos}</div>
+      <div style="margin-top:6px">${list}</div>
+      <div style="margin-top:8px; font-size:.85rem; color:#aab9ce;">
+        Observação: sua ideia de fórmula “<code>((notas somadas) / (quantos dias foi)) * 10</code>”
+        equivale a tirar a média dos <i>dias válidos</i>, pois cada dia sempre totaliza peso 1.0
+        (mesmo quando uma das duas notas do dia estiver ausente, o peso da presente vira 1.0).
+      </div>
+    `;
+  }
+
+  function clearAll(){
+    for (let i=1;i<=DIAS;i++){
+      document.getElementById(`d${i}a`).value = '';
+      document.getElementById(`d${i}b`).value = '';
+      document.getElementById(`w${i}`).textContent = 'Peso efetivo do dia: —';
+    }
+    finalGradeEl.textContent = '—';
+    detailsEl.innerHTML = '';
+    errorBox.style.display = 'none';
+    errorBox.textContent = '';
+    summaryPill.textContent = `Dias válidos: 0 / ${DIAS}`;
+  }
+
+  calcBtn.addEventListener('click', calc);
+  clearBtn.addEventListener('click', clearAll);
+
+  // cálculo automático ao digitar
+  daysGrid.addEventListener('input', (e) => {
+    const t = e.target;
+    if (t && t.matches('input[type="number"]')) {
+      // impede números fora da faixa via teclado (mantém UX boa)
+      const v = parseValue(t.value);
+      if (v !== null && (v < 0 || v > 10)) return;
+      calc();
+    }
+  });
+
+  // primeira render
+  calc();
+})();
+</script>
+</body>
+</html>
